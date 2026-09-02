@@ -1,0 +1,83 @@
+name: Update newly public FOCS papers
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/update-public-versions.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch index
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('index.html')
+          text = path.read_text()
+
+          updates = [
+              ('Parallel Reachability Faster than Transitive Closure', 'https://arxiv.org/abs/2608.13231', 'arXiv'),
+              ('Dynamic Entropy-Encoded Arrays in O(1) Time with Nearly Optimal Space', 'https://arxiv.org/abs/2608.06066', 'arXiv'),
+              ('Certified Randomness without Structure Against Shallow-Query Adversaries', 'https://arxiv.org/abs/2608.24832', 'arXiv'),
+              ('Classical Adversarial Fault-Tolerance and PCPs', 'https://arxiv.org/abs/2608.16860', 'arXiv'),
+              ('Fault-Tolerant Quantum Computation with Adversarial Errors', 'https://arxiv.org/abs/2608.16857', 'arXiv'),
+              ('Quantum Speedups Require Structure or Depth', 'https://arxiv.org/abs/2608.19158', 'arXiv'),
+              ('Stochastic Gradient Meets Randomized Rounding: New Algorithms for Node-Weighted Steiner Problems', 'https://arxiv.org/abs/2608.06807', 'arXiv'),
+              ('Zero-error information equals amortized communication complexity', 'https://arxiv.org/abs/2608.04141', 'arXiv'),
+              ('Pigeonhole Equal Subset Sum: Subexponential Algorithm, Tight Lower Bounds, and Average-Case Analysis', 'https://sites.google.com/view/pduttashomepage/publications', 'author page'),
+          ]
+
+          article_re = re.compile(r'<article class="paper".*?</article>', re.S)
+          changed = []
+          for needle, url, source in updates:
+              matches = [(m.start(), m.end(), m.group(0)) for m in article_re.finditer(text) if needle in m.group(0)]
+              if len(matches) != 1:
+                  raise RuntimeError(f'{needle!r}: expected one article, found {len(matches)}')
+              start, end, article = matches[0]
+              if 'data-status="missing"' not in article:
+                  raise RuntimeError(f'{needle!r}: article is not marked missing')
+              article = article.replace('data-status="missing"', 'data-status="linked"', 1)
+              h = re.search(r'<h2>(.*?)</h2>', article, re.S)
+              if not h:
+                  raise RuntimeError(f'{needle!r}: h2 not found')
+              title = h.group(1)
+              article = article[:h.start()] + f'<h2><a href="{url}" target="_blank" rel="noopener">{title}</a></h2>' + article[h.end():]
+              article = article.replace('<span class="badge missing">No public version located</span>', f'<span class="badge linked">Public version · {source}</span>', 1)
+              text = text[:start] + article + text[end:]
+              changed.append(needle)
+
+          if len(changed) != 9:
+              raise RuntimeError(f'Expected 9 updates, made {len(changed)}')
+
+          text, n1 = re.subn(r'<span class="stat">127 public versions located</span>', '<span class="stat">136 public versions located</span>', text, count=1)
+          text, n2 = re.subn(r'<span class="stat">Updated 2026-08-06</span>', '<span class="stat">Updated 2026-09-02</span>', text, count=1)
+          if n1 != 1 or n2 != 1:
+              raise RuntimeError(f'Stat/date replacement failed: {n1=}, {n2=}')
+
+          path.write_text(text)
+          print('Updated:', *changed, sep='\n- ')
+          PY
+      - name: Verify counts
+        shell: bash
+        run: |
+          grep -q '136 public versions located' index.html
+          test "$(grep -o 'data-status="linked"' index.html | wc -l)" -eq 136
+          test "$(grep -o 'data-status="missing"' index.html | wc -l)" -eq 38
+      - name: Commit update
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add index.html
+          git commit -m 'Add newly available FOCS 2026 public versions'
+          git push
