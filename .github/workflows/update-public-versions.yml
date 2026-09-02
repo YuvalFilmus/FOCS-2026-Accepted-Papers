@@ -1,3 +1,4 @@
+# one-off updater; remove after successful run
 name: Update newly public FOCS papers
 
 on:
